@@ -207,6 +207,55 @@ def dedupe(items: list[dict]) -> list[dict]:
         out.append(it)
     return out
 
+
+def _tokenize_upper(s: str) -> set[str]:
+    s = s or ""
+    # Split on non-alphanum, keep uppercase tokens for ticker matching
+    toks = re.findall(r"[A-Z]{2,6}", s.upper())
+    # Also capture $AAPL/$TSLA formats
+    toks += [t[1:].upper() for t in re.findall(r"\$[A-Za-z]{1,6}", s)]
+    return set(toks)
+
+def filter_items(items: list[dict], cfg: dict, override_keywords=None, override_tickers=None) -> list[dict]:
+    """Apply include filters. If include lists are non-empty, keep item if ANY matches."""
+    filters = cfg.get("filters", {}) if isinstance(cfg, dict) else {}
+    kw_list = [str(k).strip() for k in (override_keywords if override_keywords is not None else filters.get("include_keywords", [])) if str(k).strip()]
+    tk_list = [str(k).strip().upper() for k in (override_tickers if override_tickers is not None else filters.get("include_tickers", [])) if str(k).strip()]
+    if not kw_list and not tk_list:
+        return items  # no filtering
+    out = []
+    kw_pat = re.compile("|".join([re.escape(k) for k in kw_list]), re.IGNORECASE) if kw_list else None
+    for it in items:
+        text = " ".join([it.get("title") or "", it.get("raw_text") or ""])
+        hit_kw = bool(kw_pat.search(text)) if kw_pat else False
+        toks = _tokenize_upper(text)
+        hit_tk = any(t in toks for t in tk_list) if tk_list else False
+        if hit_kw or hit_tk:
+            out.append(it)
+    return out
+
+def _norm_url(u: str) -> str:
+    try:
+        url = httpx.URL(u)
+        return httpx.URL(path=url.path, host=url.host, scheme=url.scheme).human_repr()
+    except Exception:
+        return u or ""
+
+def dedupe_strong(items: list[dict]) -> list[dict]:
+    """Dedupe by normalized URL and normalized title (case/whitespace)."""
+    seen = set()
+    out = []
+    for it in items:
+        url_key = _norm_url(it.get("url") or "")
+        title_key = normalize_whitespace((it.get("title") or "").lower())
+        key = hash_key(url_key + "|" + title_key)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    return out
+
+
 def enrich_and_summarize(items: list[dict], max_sentences: int = 2) -> list[dict]:
     out = []
     for it in items:
@@ -223,7 +272,7 @@ def load_yaml(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
-async def run_once(cfg_path: str, send: bool = False, out_jsonl: str | None = "news.jsonl", out_csv: str | None = "news.csv", debug: bool = False):
+async def run_once(cfg_path: str, send: bool = False, out_jsonl: str | None = "news.jsonl", out_csv: str | None = "news.csv", debug: bool = False, kw_override=None, tk_override=None):
     cfg = load_yaml(cfg_path)
     sources = [s for s in cfg.get("sources", []) if s.get("enabled", True)]
     all_items = []
@@ -251,8 +300,14 @@ async def run_once(cfg_path: str, send: bool = False, out_jsonl: str | None = "n
             except Exception as e:
                 print(f"[ERROR] {name}: {e}", file=sys.stderr)
 
-    all_items = dedupe(all_items)
+    # Stronger dedupe
+    all_items = dedupe_strong(all_items)
+    # Apply filters (CLI overrides take precedence if provided)
+    all_items = filter_items(all_items, cfg, override_keywords=kw_override, override_tickers=tk_override)
+    # Summarize
     all_items = enrich_and_summarize(all_items)
+
+    print(f"Total after filtering & dedupe: {len(all_items)} items")
 
     # Write outputs
     ts = to_iso(now_tz())
@@ -279,12 +334,7 @@ async def run_once(cfg_path: str, send: bool = False, out_jsonl: str | None = "n
                     "url": it.get("url")
                 })
 
-    # Print to console
-    for it in all_items[:50]:
-        print(f"- [{it['source']}] {it['title']}")
-        print(f"  Date: {it['published_at']}  Source: {it['source']}")
-        print(f"  URL:  {it['url']}")
-        print(f"  Summary: {it['summary']}\n")
+    # Print to console: only per-source fetched lines are kept (above). No per-item output here.
 
     # Optional Telegram push
     if send and TELEGRAM_TOKEN and TELEGRAM_CHAT_ID and all_items:
@@ -320,10 +370,14 @@ def main():
     ap.add_argument("--interval", type=int, default=0, help="Polling interval in seconds (0 = disabled)")
     ap.add_argument("--send", action="store_true", help="Send to Telegram if configured")
     ap.add_argument("--debug", action="store_true", help="Verbose logging")
+    ap.add_argument("--keywords", type=str, default="", help="Comma-separated keywords to include (case-insensitive)")
+    ap.add_argument("--tickers", type=str, default="", help="Comma-separated tickers to include (e.g., NVDA,TSLA)")
     args = ap.parse_args()
 
     if args.once or args.interval <= 0:
-        asyncio.run(run_once(args.config, send=args.send, debug=args.debug))
+        kw_ov = [s for s in (args.keywords.split(",") if args.keywords else []) if s.strip()]
+        tk_ov = [s for s in (args.tickers.split(",") if args.tickers else []) if s.strip()]
+        asyncio.run(run_once(args.config, send=args.send, debug=args.debug, kw_override=kw_ov if kw_ov else None, tk_override=tk_ov if tk_ov else None))
     else:
         asyncio.run(run_interval(args.config, args.interval, send=args.send))
 
