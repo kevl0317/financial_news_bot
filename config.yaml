@@ -1,0 +1,47 @@
+sources:
+  - name: yahoo_finance
+    enabled: true
+    type: rss
+    url: https://finance.yahoo.com/news/rssindex
+
+  - name: reuters_markets_via_gnews
+    enabled: true
+    type: rss
+    url: https://news.google.com/rss/search?q=site:reuters.com+markets&hl=en-US&gl=US&ceid=US:en
+
+  - name: reuters_business_via_gnews
+    enabled: true
+    type: rss
+    url: https://news.google.com/rss/search?q=site:reuters.com+business&hl=en-US&gl=US&ceid=US:en
+
+  - name: cnbc_markets
+    enabled: true
+    type: rss
+    url: https://www.cnbc.com/id/100003114/device/rss/rss.html
+
+  - name: financialjuice
+    enabled: false
+    type: html
+    url: https://www.financialjuice.com/home
+    css:
+      item: "article, li.news, div.news-item"
+      title: "a, h2, h3"
+      link_attr: "href"
+      time: "time, span.time, div.time"
+      body: "p, div.body, .summary"
+
+  - name: jin10_flash
+    enabled: false
+    type: playwright
+    url: https://www.jin10.com/flash
+    wait_selector: "div.livenews-list"
+    item_selector: "div.livenews-item"
+    title_selector: "div.title, div.livenews-text"
+    time_selector: "time, span.time"
+    link_selector: "a"
+    link_attr: "href"
+
+  - name: thomsonreuters_ir_news
+    enabled: true
+    type: rss
+    url: https://ir.thomsonreuters.com/rss/news-releases.xml?items=15
