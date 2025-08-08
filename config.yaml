@@ -2,6 +2,16 @@ filters:
   include_keywords: []
   include_tickers:  []
 
+categories:
+  macro: ["inflation","CPI","PCE","jobs","employment","payrolls","unemployment","ISM","PMI","GDP"]
+  rates: ["rate","rates","yield","Treasury","bond","auction","Fed","FOMC","dot plot","Powell"]
+  fx: ["dollar","greenback","EUR","JPY","CNY","yuan","FX","forex"]
+  crypto: ["bitcoin","BTC","ETH","crypto"]
+  energy: ["oil","WTI","Brent","OPEC","gas","energy"]
+  earnings: ["earnings","EPS","revenue","guidance","outlook","beat","miss"]
+  tech: ["AI","chip","semiconductor","GPU","datacenter","cloud","software","cybersecurity","TSMC","NVIDIA","NVDA"]
+  geopolitics: ["sanction","tariff","ban","trade","geopolit","war","conflict"]
+
 sources:
   - name: yahoo_finance
     enabled: true
@@ -63,7 +73,7 @@ sources:
     type: rss
     url: "https://news.google.com/rss/search?q=site:wsj.com+(markets+OR+stocks+OR+earnings)&hl=en-US&gl=US&ceid=US:en"
 
-  # Disabled dynamic sources for now
+  # Dynamic sources disabled for stability
   - name: financialjuice
     enabled: false
     type: playwright

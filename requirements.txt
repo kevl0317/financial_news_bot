@@ -2,11 +2,7 @@ httpx==0.27.0
 beautifulsoup4==4.12.3
 lxml==5.2.1
 feedparser==6.0.11
-sumy==0.11.0
 python-dateutil==2.9.0
-pytz==2024.1
-pandas==2.2.2
 aiocache==0.12.2
-apscheduler==3.10.4
-discord.py==2.3.2
 PyYAML==6.0.2
+discord.py==2.3.2
