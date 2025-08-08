@@ -23,24 +23,53 @@ sources:
     type: rss
     url: https://www.cnbc.com/id/100003114/device/rss/rss.html
 
+  - name: bloomberg_via_gnews
+    enabled: true
+    type: rss
+    url: "https://news.google.com/rss/search?q=site:bloomberg.com+(markets+OR+stocks+OR+earnings)&hl=en-US&gl=US&ceid=US:en"
+
+  - name: marketwatch_via_gnews
+    enabled: true
+    type: rss
+    url: "https://news.google.com/rss/search?q=site:marketwatch.com+(markets+OR+stocks+OR+earnings)&hl=en-US&gl=US&ceid=US:en"
+
+  - name: barrons_via_gnews
+    enabled: true
+    type: rss
+    url: "https://news.google.com/rss/search?q=site:barrons.com+(markets+OR+stocks+OR+earnings)&hl=en-US&gl=US&ceid=US:en"
+
+  - name: ft_via_gnews
+    enabled: true
+    type: rss
+    url: "https://news.google.com/rss/search?q=site:ft.com+(markets+OR+stocks+OR+earnings)&hl=en-US&gl=US&ceid=US:en"
+
+  - name: seekingalpha_via_gnews
+    enabled: true
+    type: rss
+    url: "https://news.google.com/rss/search?q=site:seekingalpha.com+(markets+OR+stocks+OR+earnings)&hl=en-US&gl=US&ceid=US:en"
+
+  - name: nasdaq_via_gnews
+    enabled: true
+    type: rss
+    url: "https://news.google.com/rss/search?q=site:nasdaq.com+(news+OR+earnings+OR+markets)&hl=en-US&gl=US&ceid=US:en"
+
+  - name: investing_via_gnews
+    enabled: true
+    type: rss
+    url: "https://news.google.com/rss/search?q=site:investing.com+(news+OR+markets+OR+stocks)&hl=en-US&gl=US&ceid=US:en"
+
+  - name: wsj_via_gnews
+    enabled: true
+    type: rss
+    url: "https://news.google.com/rss/search?q=site:wsj.com+(markets+OR+stocks+OR+earnings)&hl=en-US&gl=US&ceid=US:en"
+
+  # Disabled dynamic sources for now
   - name: financialjuice
     enabled: false
     type: playwright
     url: https://www.financialjuice.com/home
-    wait_selector: "body"
-    item_selector: "article, li.news-item, div.news-item"
-    title_selector: "a, h2, h3, .title, .headline"
-    time_selector: "time, .time, .timestamp"
-    link_selector: "a"
-    link_attr: "href"
 
   - name: jin10_flash
     enabled: false
     type: playwright
     url: https://www.jin10.com/flash
-    wait_selector: "div.livenews-list"
-    item_selector: "div.livenews-item"
-    title_selector: "div.title, div.livenews-text"
-    time_selector: "time, span.time"
-    link_selector: "a"
-    link_attr: "href"

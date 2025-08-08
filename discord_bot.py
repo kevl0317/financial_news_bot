@@ -137,7 +137,8 @@ class NewsDiscordBot(discord.Client):
         try:
             dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=ET_TZ)
+                from zoneinfo import ZoneInfo
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
             return dt.astimezone(ET_TZ)
         except Exception:
             return None
@@ -162,22 +163,21 @@ class NewsDiscordBot(discord.Client):
         new_items = self.tail.read_new()
         if self.args.verbose:
             print(f"[Discord] tail new lines: {len(new_items)}")
-
         if not new_items:
             return
 
+        # Only today (ET) and sort
+        today_et = datetime.now(ET_TZ).date()
         today_items = []
-        today_date_et = datetime.now(ET_TZ).date()
         for it in new_items:
             dt_et = self._parse_iso_to_et(it.get("published_at",""))
-            if dt_et and dt_et.date() == today_date_et:
+            if dt_et and dt_et.date() == today_et:
                 it["_dt_et"] = dt_et
                 today_items.append(it)
-
         today_items.sort(key=lambda x: x["_dt_et"])
+
         if self.args.verbose:
             print(f"[Discord] today-only after tail: {len(today_items)}")
-
         if not today_items:
             return
 
@@ -186,35 +186,42 @@ class NewsDiscordBot(discord.Client):
             print(f"[ERROR] Channel ID {self.channel_id} not found.")
             return
 
-        sent_count = 0
+        # Build clean messages (no emojis), batch send
+        msgs = []
         for it in today_items:
             key = self.newsbot.hash_key((it.get("url") or "") + "|" + (it.get("title") or ""))
             if self.sent.has(key):
                 continue
+            src = it.get("source","")
+            title = (it.get("title","") or "").strip()
+            url = it.get("url","")
+            dt_et = it.get("_dt_et") or self._parse_iso_to_et(it.get("published_at",""))
+            time_str = dt_et.strftime("%b %d %H:%M ET") if dt_et else (it.get("published_at","") or "")
+            line = f"***{title}***\nTime: {time_str}"
+            # if url:
+            #     line += f"\n<{url}>"  # suppress preview
+            msgs.append(line)
+            self.sent.add(key, it)
+            if len(msgs) >= self.args.max:
+                break
+
+        if msgs:
+            combined = "\n\n".join(msgs)
             try:
-                msg = self._format_item(it)
-                sent = await channel.send(msg)
-                try:
-                    await sent.edit(suppress=True)  # ensure no link preview if any URL slips in
-                except Exception:
-                    pass
-                self.sent.add(key, it)
-                sent_count += 1
-                if sent_count >= self.args.max:
-                    break
+                await channel.send(combined)
             except Exception as e:
                 print(f"[Discord send ERROR] {e}")
-                continue
-
-        if sent_count:
-            print(f"[Discord] pushed {sent_count} items (today only).")
 
     def _format_item(self, it: dict) -> str:
+        # Not used in batch mode; kept for compatibility
+        src = it.get("source","")
         title = (it.get("title","") or "").strip()
-        src   = it.get("source","")
         dt_et = it.get("_dt_et") or self._parse_iso_to_et(it.get("published_at",""))
-        date_fmt = dt_et.strftime("%b %d %H:%M") if dt_et else (it.get("published_at","") or "")
-        return f"**{title}**\n📅 {date_fmt} ET  🏷️ {src}"
+        time_str = dt_et.strftime("%b %d %H:%M ET") if dt_et else (it.get("published_at","") or "")
+        url = it.get("url","")
+        line = f"[{src}] {title}\nTime: {time_str}"
+        # if url: line += f"\n<{url}>"
+        return line
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Discord relay for newsbot")
@@ -225,12 +232,13 @@ def parse_args():
     ap.add_argument("--jsonl-path", default=str(Path(__file__).parent / "news.jsonl"))
     ap.add_argument("--state-dir", default=str(Path(__file__).parent / ".state"))
     ap.add_argument("--interval", type=int, default=30, help="Seconds between updates (default 30)")
-    ap.add_argument("--max", type=int, default=5, help="Max items per push per cycle (default 5)")
+    ap.add_argument("--max", type=int, default=5, help="Max items per batch (default 5)")
     ap.add_argument("--keywords", type=str, default="", help="Comma-separated keywords")
     ap.add_argument("--tickers", type=str, default="", help="Comma-separated tickers, e.g. NVDA,TSLA")
     ap.add_argument("--tech", action="store_true", help="Use built-in tech filters (keywords+tickers)")
     ap.add_argument("--reset-offset", action="store_true", help="Reset JSONL offset and clear sent cache on startup.")
     ap.add_argument("--verbose", action="store_true", help="Extra logs: tail counts and today counts.")
+
     return ap.parse_args()
 
 def main():

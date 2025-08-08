@@ -8,6 +8,5 @@ pytz==2024.1
 pandas==2.2.2
 aiocache==0.12.2
 apscheduler==3.10.4
-playwright==1.44.0
 discord.py==2.3.2
 PyYAML==6.0.2

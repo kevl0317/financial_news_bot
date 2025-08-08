@@ -1,52 +1,34 @@
-# Finance News Bot (ET, Today-only) + Discord Relay
+# Finance News Bot (ET + Today-only) + Discord Batch Relay
 
-This project fetches finance headlines from multiple sources (Yahoo Finance, Reuters via Google News, CNBC, FinancialJuice, Jin10),
-**parses timestamps robustly**, converts times to **Eastern Time (America/New_York)**, and **keeps only today's items in ET**.
-It writes to JSONL/CSV and includes a Discord relay that posts **title + time (ET) + source** every 30 seconds with **no link preview**.
-You can filter by keywords/tickers or a one-flag `--tech` preset.
-
-> ⚠️ Respect site Terms of Service/robots.txt. Prefer RSS/APIs when possible.
+- Fetches finance headlines (Yahoo Finance, Reuters via Google News, CNBC, Bloomberg, MarketWatch, Barron's, FT, SeekingAlpha, Nasdaq, Investing, WSJ).
+- Robust timestamp parsing → converts to **ET** and keeps **today-only**.
+- Writes JSONL/CSV; Discord relay every 30s.
+- Discord messages are **clean text (no emojis)** and **batch-sent** so each update shows the bot's **name & icon once** (avoids stacked/misleading blocks).
+- Link previews are suppressed by wrapping URLs in `<...>`.
 
 ## Quick Start
 ```bash
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-source .venv/bin/activate
-
+.venv\Scripts\activate     # Windows
 pip install -r requirements.txt
-playwright install       # for FinancialJuice / Jin10
+playwright install           # (not used by default now; FJ/Jin10 disabled)
 ```
 
-### Run crawler
+## Run the crawler
 ```bash
-# once
 python newsbot.py --once --debug
-# loop every 60s
-python newsbot.py --interval 60 --debug
-# keywords/tickers
-python newsbot.py --once --keywords earnings,rate --tickers NVDA,TSLA
+python newsbot.py --interval 60
 ```
 
-### Discord relay (every 30s)
+## Run the Discord relay (batch send)
 ```bash
-# Windows CMD/PowerShell
 python discord_bot.py --token YOUR_BOT_TOKEN --channel-id 123456789012345678 --interval 30 --tech --max 20 --verbose
-# Or set env var in CMD:
-#   set DISCORD_BOT_TOKEN=YOUR_BOT_TOKEN
-# and run without --token
-```
-
-### One-time backfill of today's items
-```bash
+# One-time backfill:
 python discord_bot.py --channel-id 123456789012345678 --interval 30 --max 50 --reset-offset --verbose
 ```
 
-## Files
-- `newsbot.py` — crawler with **ET-aware date parsing** and **today-only in ET**
-- `discord_bot.py` — Discord relay (title + `%b %d %H:%M` ET, no preview, `--tech` + filters, reset/verbose flags)
-- `config.yaml` — sources & defaults
-- `requirements.txt` — deps
-- Outputs: `news.jsonl`, `news.csv`
-
+## Config tips
+- Filters in `config.yaml` are optional; you can override at runtime:
+  - `--keywords earnings,rate`
+  - `--tickers NVDA,TSLA`
+  - `--tech` for a built-in tech preset (keywords + tickers)
