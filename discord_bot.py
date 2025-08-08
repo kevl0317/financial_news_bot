@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
-import os
-import json
-import sqlite3
-import asyncio
-import argparse
+import os, json, sqlite3, asyncio, argparse
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import discord
 from discord.ext import tasks
-
-# === 关键：导入你已有的 newsbot.py 并直接调用其 run_once ===
 import importlib.util
+
+ET_TZ = ZoneInfo("America/New_York")
+
+TECH_KEYWORDS = [
+    "tech","AI","artificial intelligence","chip","semiconductor","foundry","fab",
+    "GPU","CPU","NPU","datacenter","cloud","SaaS","software","cybersecurity",
+    "LLM","GPT","Llama","OpenAI","Anthropic","stability ai","AR","VR","XR",
+    "quantum","robotics","autonomous","5G","edge","compute","server","hyperscaler",
+    "TikTok","ByteDance","WeChat","Huawei","Apple","Google","Microsoft","Meta","Amazon"
+]
+
+TECH_TICKERS = [
+    "NVDA","AMD","INTC","AVGO","ASML","ARM","MU","QCOM","TSM","SMCI",
+    "AAPL","MSFT","GOOGL","GOOG","META","AMZN","TSLA","CRM","ADBE","ORCL",
+    "NOW","PANW","CRWD","NET","ZS","SNOW","PLTR","SHOP","UBER","ABNB"
+]
 
 def import_newsbot(module_path: str):
     spec = importlib.util.spec_from_file_location("newsbot", module_path)
@@ -19,7 +30,6 @@ def import_newsbot(module_path: str):
     spec.loader.exec_module(mod)  # type: ignore
     return mod
 
-# ---- 简单的“发送去重”存储（SQLite） ----
 class SentStore:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -60,7 +70,6 @@ class SentStore:
             )
             conn.commit()
 
-# ---- 读取 news.jsonl 新增行（用文件偏移避免重复读取）----
 class JsonlTail:
     def __init__(self, path: Path, offset_state: Path):
         self.path = path
@@ -86,11 +95,9 @@ class JsonlTail:
                     new_items.append(obj)
                 except Exception:
                     continue
-        # 更新偏移
         self.offset_state.write_text(str(size), encoding="utf-8")
         return new_items
 
-# ---- Discord Bot ----
 class NewsDiscordBot(discord.Client):
     def __init__(self, *, intents: discord.Intents, args):
         super().__init__(intents=intents)
@@ -102,7 +109,6 @@ class NewsDiscordBot(discord.Client):
             path=Path(args.jsonl_path),
             offset_state=Path(args.state_dir) / "jsonl.offset"
         )
-        self.loop_task = self._task_loop  # alias
 
     async def on_ready(self):
         print(f"Logged in as {self.user} (id={self.user.id})")  # type: ignore
@@ -110,86 +116,105 @@ class NewsDiscordBot(discord.Client):
         if channel is None:
             print(f"[ERROR] Channel ID {self.channel_id} not found. Is the bot in the server?")
             return
-        # 启动循环任务
+
+        if self.args.reset_offset:
+            try:
+                (Path(self.args.state_dir) / "jsonl.offset").write_text("0", encoding="utf-8")
+                import sqlite3
+                with sqlite3.connect(Path(self.args.state_dir) / "sent.db") as conn:
+                    conn.execute("DELETE FROM sent")
+                    conn.commit()
+                print("[State] Reset offset and cleared sent cache.")
+            except Exception as e:
+                print(f"[State] Reset failed: {e}")
+
         self._task_loop.change_interval(seconds=self.args.interval)
         self._task_loop.start()
 
+    def _parse_iso_to_et(self, s: str):
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ET_TZ)
+            return dt.astimezone(ET_TZ)
+        except Exception:
+            return None
+
     @tasks.loop(seconds=30.0)
     async def _task_loop(self):
-        # 1) 调用 newsbot 进行一次抓取（复用你的 --keywords / --tickers 覆盖）
         kw_ov = [s for s in (self.args.keywords.split(",") if self.args.keywords else []) if s.strip()]
         tk_ov = [s for s in (self.args.tickers.split(",") if self.args.tickers else []) if s.strip()]
+        if self.args.tech:
+            kw_ov = sorted(set((kw_ov or []) + TECH_KEYWORDS))
+            tk_ov = sorted(set((tk_ov or []) + TECH_TICKERS))
+
         try:
             await self.newsbot.run_once(
-                self.args.config,
-                send=False,
-                debug=False,
+                self.args.config, send=False, debug=self.args.verbose,
                 kw_override=kw_ov if kw_ov else None,
                 tk_override=tk_ov if tk_ov else None
             )
         except Exception as e:
             print(f"[run_once ERROR] {e}")
 
-        # 2) 读取本轮新增的 JSONL 行
         new_items = self.tail.read_new()
+        if self.args.verbose:
+            print(f"[Discord] tail new lines: {len(new_items)}")
+
         if not new_items:
-            print("[Discord] no new items.")
             return
 
-        # 3) 去重 + 限量发送
+        today_items = []
+        today_date_et = datetime.now(ET_TZ).date()
+        for it in new_items:
+            dt_et = self._parse_iso_to_et(it.get("published_at",""))
+            if dt_et and dt_et.date() == today_date_et:
+                it["_dt_et"] = dt_et
+                today_items.append(it)
+
+        today_items.sort(key=lambda x: x["_dt_et"])
+        if self.args.verbose:
+            print(f"[Discord] today-only after tail: {len(today_items)}")
+
+        if not today_items:
+            return
+
         channel = self.get_channel(self.channel_id)
         if channel is None:
             print(f"[ERROR] Channel ID {self.channel_id} not found.")
             return
 
         sent_count = 0
-        max_per_push = self.args.max
-        for it in new_items:
-            # 用 URL+title 做唯一键
+        for it in today_items:
             key = self.newsbot.hash_key((it.get("url") or "") + "|" + (it.get("title") or ""))
             if self.sent.has(key):
                 continue
-            # 发送到 Discord
             try:
                 msg = self._format_item(it)
-                await channel.send(msg)
+                sent = await channel.send(msg)
+                try:
+                    await sent.edit(suppress=True)  # ensure no link preview if any URL slips in
+                except Exception:
+                    pass
                 self.sent.add(key, it)
                 sent_count += 1
-                if sent_count >= max_per_push:
+                if sent_count >= self.args.max:
                     break
             except Exception as e:
                 print(f"[Discord send ERROR] {e}")
                 continue
 
         if sent_count:
-            print(f"[Discord] pushed {sent_count} items.")
-
-    from datetime import datetime
+            print(f"[Discord] pushed {sent_count} items (today only).")
 
     def _format_item(self, it: dict) -> str:
-        # Title only
-        title = (it.get("title", "") or "").strip()
-
-        # Format time: Month Day HH:MM (use local time from published_at ISO)
-        date_str = it.get("published_at", "")
-        try:
-            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            # Convert to local time if needed
-            dt = dt.astimezone()
-            date_fmt = dt.strftime("%b %d %H:%M")  # e.g., Aug 08 17:49
-        except Exception:
-            date_fmt = date_str
-
-        src = it.get("source", "")
-        url = it.get("url", "")
-
-        # Suppress link preview if URL exists
-        if url:
-            url = f"<{url}>"
-
-        return f"**{title}**\n📅 {date_fmt}  🏷️ {src}\n{url}"
-
-
+        title = (it.get("title","") or "").strip()
+        src   = it.get("source","")
+        dt_et = it.get("_dt_et") or self._parse_iso_to_et(it.get("published_at",""))
+        date_fmt = dt_et.strftime("%b %d %H:%M") if dt_et else (it.get("published_at","") or "")
+        return f"**{title}**\n📅 {date_fmt} ET  🏷️ {src}"
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Discord relay for newsbot")
@@ -200,18 +225,26 @@ def parse_args():
     ap.add_argument("--jsonl-path", default=str(Path(__file__).parent / "news.jsonl"))
     ap.add_argument("--state-dir", default=str(Path(__file__).parent / ".state"))
     ap.add_argument("--interval", type=int, default=30, help="Seconds between updates (default 30)")
-    ap.add_argument("--max", type=int, default=5, help="Max items per push (default 5)")
+    ap.add_argument("--max", type=int, default=5, help="Max items per push per cycle (default 5)")
     ap.add_argument("--keywords", type=str, default="", help="Comma-separated keywords")
     ap.add_argument("--tickers", type=str, default="", help="Comma-separated tickers, e.g. NVDA,TSLA")
+    ap.add_argument("--tech", action="store_true", help="Use built-in tech filters (keywords+tickers)")
+    ap.add_argument("--reset-offset", action="store_true", help="Reset JSONL offset and clear sent cache on startup.")
+    ap.add_argument("--verbose", action="store_true", help="Extra logs: tail counts and today counts.")
     return ap.parse_args()
 
 def main():
     args = parse_args()
-    if not args.token:
-        raise SystemExit("Missing Discord token. Set --token or DISCORD_BOT_TOKEN env.")
+    token = args.token or os.getenv("DISCORD_BOT_TOKEN")
+    if not token:
+        raise SystemExit("Missing Discord token. Set --token or DISCORD_BOT_TOKEN.")
+
     intents = discord.Intents.default()
     client = NewsDiscordBot(intents=intents, args=args)
-    client.run(args.token)
+    try:
+        client.run(token, reconnect=True)
+    except discord.errors.LoginFailure:
+        raise SystemExit("LoginFailure: invalid token (double-check).")
 
 if __name__ == "__main__":
     main()

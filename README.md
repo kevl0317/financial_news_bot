@@ -1,45 +1,52 @@
-# Finance News Bot (Polling + Summarization)
+# Finance News Bot (ET, Today-only) + Discord Relay
 
-A lightweight Python bot that polls multiple finance news sources (e.g., Yahoo Finance, FinancialJuice, 金十) on a schedule,
-summarizes each item, and saves the output with **date and source**. You can print to console, save to CSV/JSONL, and optionally
-send to Telegram.
+This project fetches finance headlines from multiple sources (Yahoo Finance, Reuters via Google News, CNBC, FinancialJuice, Jin10),
+**parses timestamps robustly**, converts times to **Eastern Time (America/New_York)**, and **keeps only today's items in ET**.
+It writes to JSONL/CSV and includes a Discord relay that posts **title + time (ET) + source** every 30 seconds with **no link preview**.
+You can filter by keywords/tickers or a one-flag `--tech` preset.
 
-> ⚠️ **Respect robots.txt and site Terms of Service**. Some sites block scraping or require a license/API. Use RSS/official APIs
-> whenever possible. The included scrapers are examples and may need adjustments.
-
-## Features
-- Async fetching with `httpx` (faster than sequential requests)
-- Pluggable scrapers per source, configured via `config.yaml`
-- Simple extractive summarization (TextRank via `sumy`) with graceful fallback
-- Deduplication by URL/title (SQLite or in-memory)
-- Output to console + JSONL/CSV with timestamp and source
-- Optional Telegram push
+> ⚠️ Respect site Terms of Service/robots.txt. Prefer RSS/APIs when possible.
 
 ## Quick Start
-
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+# Windows
+.venv\Scripts\activate
+# macOS/Linux
+source .venv/bin/activate
+
 pip install -r requirements.txt
-python newsbot.py --once        # run once
-python newsbot.py --interval 60 # poll every 60 seconds
+playwright install       # for FinancialJuice / Jin10
 ```
 
-### Configure sources
-Edit `config.yaml`. Examples included for:
-- **Yahoo Finance** (RSS): `https://finance.yahoo.com/news/rssindex`
-- **FinancialJuice** (homepage HTML): Example CSS selectors (may change).
-- **金十 (Jin10)**: Uses Playwright (headless browser) to load dynamic content from https://www.jin10.com/flash .
-  *Playwright is optional; disable if not needed.*
-
-### Telegram (optional)
-Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` as env vars, then run:
+### Run crawler
 ```bash
-python newsbot.py --interval 120 --send
+# once
+python newsbot.py --once --debug
+# loop every 60s
+python newsbot.py --interval 60 --debug
+# keywords/tickers
+python newsbot.py --once --keywords earnings,rate --tickers NVDA,TSLA
 ```
 
-## Notes
-- If `sumy` isn't installed or fails, the bot will produce a short fallback snippet (first 280 chars).
-- Playwright first run needs: `playwright install`.
-- **Legal**: Always follow site ToS; prefer RSS/official APIs. This repo is for educational/demo purposes only.
+### Discord relay (every 30s)
+```bash
+# Windows CMD/PowerShell
+python discord_bot.py --token YOUR_BOT_TOKEN --channel-id 123456789012345678 --interval 30 --tech --max 20 --verbose
+# Or set env var in CMD:
+#   set DISCORD_BOT_TOKEN=YOUR_BOT_TOKEN
+# and run without --token
+```
+
+### One-time backfill of today's items
+```bash
+python discord_bot.py --channel-id 123456789012345678 --interval 30 --max 50 --reset-offset --verbose
+```
+
+## Files
+- `newsbot.py` — crawler with **ET-aware date parsing** and **today-only in ET**
+- `discord_bot.py` — Discord relay (title + `%b %d %H:%M` ET, no preview, `--tech` + filters, reset/verbose flags)
+- `config.yaml` — sources & defaults
+- `requirements.txt` — deps
+- Outputs: `news.jsonl`, `news.csv`
 
